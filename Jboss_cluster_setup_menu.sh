@@ -66,48 +66,46 @@ EOF
 }
 
 setup_apache_webserver() {
-  echo "====== Setup Apache Web Server ======"
-  read -p "How many JBoss APP nodes to load balance? " COUNT
-  APP_SERVERS=()
-  for ((i=1; i<=COUNT; i++)); do
-    read -p "Enter APP Node $i (IP:PORT): " NODE
-    APP_SERVERS+=("$NODE")
-  done
+  echo "====== Setup Apache Web Server with mod_cluster ======"
 
-  echo "[INFO] Installing Apache HTTPD using $PKG_MGR..."
-  $PKG_MGR install -y httpd mod_proxy mod_proxy_http mod_proxy_balancer mod_slotmem_shm
+  echo "[INFO] Installing Apache HTTPD and mod_cluster using $PKG_MGR..."
+  $PKG_MGR install -y httpd mod_cluster
 
-  echo "[INFO] Writing balancer config to $BALANCER_CONF"
+  echo "[INFO] Writing mod_cluster config to $BALANCER_CONF"
   cat <<EOF > "$BALANCER_CONF"
-ProxyPreserveHost On
+LoadModule proxy_cluster_module modules/mod_proxy_cluster.so
+LoadModule advertise_module modules/mod_advertise.so
 
-<Proxy "balancer://jboss_cluster">
-EOF
+Listen 80
+ManagerBalancerName mycluster
 
-  for NODE in "${APP_SERVERS[@]}"; do
-    echo "  BalancerMember http://$NODE" >> "$BALANCER_CONF"
-  done
+<VirtualHost *:80>
+    ServerName localhost
 
-  cat <<EOF >> "$BALANCER_CONF"
-  ProxySet lbmethod=byrequests
-</Proxy>
+    EnableMCPMReceive
+    MaxMCMPConnections 10
+    ServerAdvertise on
 
-ProxyPass / balancer://jboss_cluster/
-ProxyPassReverse / balancer://jboss_cluster/
+    <Directory />
+        Require all granted
+    </Directory>
 
-<Location "/balancer-manager">
-    SetHandler balancer-manager
-    Require all granted
-</Location>
+    <Location "/mod_cluster_manager">
+        SetHandler mod_cluster-manager
+        Require all granted
+    </Location>
+</VirtualHost>
 EOF
 
   echo "[INFO] Enabling and restarting Apache..."
   systemctl enable httpd
   systemctl restart httpd
 
-  echo "[SUCCESS] Apache ready at: http://<this-vm-ip>/"
-  echo "Balancer Manager: http://<this-vm-ip>/balancer-manager"
+  echo "[INFO] Ensure JBoss is configured with mod_cluster subsystem and matching advertise socket."
+  echo "[SUCCESS] Apache with mod_cluster is ready at: http://<this-vm-ip>/"
+  echo "mod_cluster Manager: http://<this-vm-ip>/mod_cluster_manager"
 }
+
 
 # --- Menu ---
 
